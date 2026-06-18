@@ -1,0 +1,4 @@
+Notes 6/16/2026
+-- confine to western US 
+-- examine strictness of snow mask
+-- develop skinny script to just generate necessary tifs from workflow

@@ -10,32 +10,13 @@ library(fs)
 library(tictoc)
 
 # ------------------------------------------------------------
-# Download hourly ERA5-Land soil moisture for target month
-# and aggregate to monthly mean.
+# Download hourly ERA5-Land soil moisture for a full calendar
+# month and aggregate to monthly mean.
 #
 # Output examples:
 #   data/processed/current_monthly/swvl1_monthly_mean_2025_05_ERA5Land_hourly_derived.tif
 #   data/processed/current_monthly/swvl2_monthly_mean_2025_05_ERA5Land_hourly_derived.tif
 # ------------------------------------------------------------
-
-get_previous_month <- function(today = Sys.Date()) {
-  
-  first_day_this_month <- floor_date(today, unit = "month")
-  target_date <- first_day_this_month %m-% months(1)
-  
-  list(
-    year = year(target_date),
-    month = month(target_date)
-  )
-}
-
-get_days_in_month <- function(year, month) {
-  
-  start_date <- as.Date(sprintf("%04d-%02d-01", year, month))
-  end_date <- ceiling_date(start_date, unit = "month") - days(1)
-  
-  seq(start_date, end_date, by = "day")
-}
 
 download_current_month_swvl <- function(year = NULL,
                                         month = NULL,
@@ -43,7 +24,6 @@ download_current_month_swvl <- function(year = NULL,
                                         overwrite = FALSE,
                                         keep_hourly_tif = FALSE,
                                         delete_download_zip = FALSE) {
-  
   if (is.null(year) || is.null(month)) {
     target <- get_previous_month()
     year <- target$year
@@ -83,7 +63,7 @@ download_current_month_swvl <- function(year = NULL,
   }
   
   month_dates <- get_days_in_month(year, month)
-  day_vec <- sprintf("%02d", day(month_dates))
+  day_vec <- sprintf("%02d", lubridate::day(month_dates))
   time_vec <- sprintf("%02d:00", 0:23)
   
   zip_target <- paste0(
@@ -109,9 +89,8 @@ download_current_month_swvl <- function(year = NULL,
     target = zip_target
   )
   
-  fs::dir_create(dir_current_raw)
-  fs::dir_create(dir_temp)
-  
+  fs::dir_create(dir_current_raw, recurse = TRUE)
+  fs::dir_create(dir_temp, recurse = TRUE)
   unlink(file.path(dir_temp, "*"), recursive = TRUE, force = TRUE)
   
   message("Downloading hourly ERA5-Land ", layer_shortname)
@@ -125,12 +104,6 @@ download_current_month_swvl <- function(year = NULL,
     jitter = 60
   )
   tictoc::toc()
-  
-  if (!file.exists(zip_file)) {
-    stop("Download failed or file not found: ", zip_file)
-  }
-  
-  message("Extracting: ", zip_file)
   
   archive::archive_extract(zip_file, dir = dir_temp)
   
@@ -150,26 +123,16 @@ download_current_month_swvl <- function(year = NULL,
     print(nc_files)
   }
   
-  nc_file <- nc_files[1]
+  r_hourly <- terra::rast(nc_files[1])
   
-  message("Reading NetCDF: ", nc_file)
-  
-  r_hourly <- terra::rast(nc_file)
-  
-  print(r_hourly)
-  print(names(r_hourly))
-  
-  expected_layers <- length(month_dates) * length(time_vec)
-  
-  if (terra::nlyr(r_hourly) != expected_layers) {
-    warning(
-      "Expected ",
-      expected_layers,
-      " hourly layers but found ",
-      terra::nlyr(r_hourly),
-      ". Inspect layer order before using operationally."
-    )
-  }
+  check_complete_hourly_layers(
+    r_hourly = r_hourly,
+    year = year,
+    month = month,
+    month_dates = month_dates,
+    time_vec = time_vec,
+    label = paste0("Soil moisture ", layer_shortname)
+  )
   
   layer_times <- as.POSIXct(
     paste(
@@ -179,58 +142,30 @@ download_current_month_swvl <- function(year = NULL,
     tz = "UTC"
   )
   
-  if (length(layer_times) == terra::nlyr(r_hourly)) {
-    names(r_hourly) <- paste0(
-      layer_shortname,
-      "_",
-      format(layer_times, "%Y%m%d_%H")
-    )
-  }
+  names(r_hourly) <- paste0(layer_shortname, "_", format(layer_times, "%Y%m%d_%H"))
   
-  # Aggregate hourly to daily means first so each day receives equal weight.
   message("Aggregating hourly data to daily means")
+  daily_index <- as.Date(layer_times)
   
-  if (length(layer_times) == terra::nlyr(r_hourly)) {
-    
-    daily_index <- as.Date(layer_times)
-    
-    r_daily <- terra::tapp(
-      r_hourly,
-      index = daily_index,
-      fun = mean,
-      na.rm = TRUE
-    )
-    
-    names(r_daily) <- paste0(
-      layer_shortname,
-      "_daily_mean_",
-      format(unique(daily_index), "%Y%m%d")
-    )
-    
-  } else {
-    
-    message("Layer count mismatch. Aggregating all layers directly to monthly mean.")
-    r_daily <- NULL
-  }
-  
-  message("Aggregating to monthly mean")
-  
-  if (!is.null(r_daily)) {
-    r_monthly <- terra::app(r_daily, mean, na.rm = TRUE)
-  } else {
-    r_monthly <- terra::app(r_hourly, mean, na.rm = TRUE)
-  }
-  
-  names(r_monthly) <- paste0(
-    layer_shortname,
-    "_monthly_mean_",
-    year,
-    "_",
-    month_chr
+  r_daily <- terra::tapp(
+    r_hourly,
+    index = daily_index,
+    fun = mean,
+    na.rm = TRUE
   )
   
-  message("Writing monthly mean raster: ", out_monthly_file)
+  names(r_daily) <- paste0(
+    layer_shortname,
+    "_daily_mean_",
+    format(unique(daily_index), "%Y%m%d")
+  )
   
+  message("Aggregating daily means to monthly mean")
+  r_monthly <- terra::app(r_daily, mean, na.rm = TRUE)
+  
+  names(r_monthly) <- paste0(layer_shortname, "_monthly_mean_", year, "_", month_chr)
+  
+  message("Writing monthly mean raster: ", out_monthly_file)
   terra::writeRaster(
     r_monthly,
     filename = out_monthly_file,
@@ -239,17 +174,9 @@ download_current_month_swvl <- function(year = NULL,
   )
   
   if (keep_hourly_tif) {
-    
     hourly_tif <- file.path(
       dir_current_raw,
-      paste0(
-        layer_shortname,
-        "_hourly_",
-        year,
-        "_",
-        month_chr,
-        "_ERA5Land.tif"
-      )
+      paste0(layer_shortname, "_hourly_", year, "_", month_chr, "_ERA5Land.tif")
     )
     
     terra::writeRaster(
@@ -259,27 +186,17 @@ download_current_month_swvl <- function(year = NULL,
       gdal = c("COMPRESS=LZW")
     )
     
-    if (!is.null(r_daily)) {
-      
-      daily_tif <- file.path(
-        dir_current_raw,
-        paste0(
-          layer_shortname,
-          "_daily_mean_",
-          year,
-          "_",
-          month_chr,
-          "_ERA5Land.tif"
-        )
-      )
-      
-      terra::writeRaster(
-        r_daily,
-        filename = daily_tif,
-        overwrite = TRUE,
-        gdal = c("COMPRESS=LZW")
-      )
-    }
+    daily_tif <- file.path(
+      dir_current_raw,
+      paste0(layer_shortname, "_daily_mean_", year, "_", month_chr, "_ERA5Land.tif")
+    )
+    
+    terra::writeRaster(
+      r_daily,
+      filename = daily_tif,
+      overwrite = TRUE,
+      gdal = c("COMPRESS=LZW")
+    )
   }
   
   unlink(file.path(dir_temp, "*"), recursive = TRUE, force = TRUE)
@@ -290,6 +207,5 @@ download_current_month_swvl <- function(year = NULL,
   }
   
   message("Finished current-month download and aggregation for ", layer_shortname)
-  
   out_monthly_file
 }

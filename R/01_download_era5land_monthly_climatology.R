@@ -9,17 +9,16 @@ library(tictoc)
 library(fs)
 
 # ------------------------------------------------------------
-# Download ERA5-Land monthly means for climatology
+# Download ERA5-Land monthly means for climatology.
 #
 # Output examples:
-#   data/raw/era5land_monthly/1991_swvl1_ERA5Land_monthly.tif
-#   data/raw/era5land_monthly/1991_swvl2_ERA5Land_monthly.tif
+#   data/raw/era5land_monthly/1981_swvl1_ERA5Land_monthly.tif
+#   data/raw/era5land_monthly/1981_swvl2_ERA5Land_monthly.tif
 # ------------------------------------------------------------
 
 download_era5land_monthly_year <- function(year,
                                            layer_shortname = "swvl1",
                                            overwrite = FALSE) {
-  
   layer_variable <- get_soil_layer_variable(layer_shortname)
   
   out_file <- file.path(
@@ -53,7 +52,7 @@ download_era5land_monthly_year <- function(year,
     target = zip_target
   )
   
-  fs::dir_create(dir_temp)
+  fs::dir_create(dir_temp, recurse = TRUE)
   unlink(file.path(dir_temp, "*"), recursive = TRUE, force = TRUE)
   
   message("Downloading ERA5-Land ", layer_shortname, " for ", year)
@@ -67,10 +66,6 @@ download_era5land_monthly_year <- function(year,
     jitter = 60
   )
   tictoc::toc()
-  
-  if (!file.exists(zip_file)) {
-    stop("Download failed or file not found: ", zip_file)
-  }
   
   archive::archive_extract(zip_file, dir = dir_temp)
   
@@ -90,13 +85,7 @@ download_era5land_monthly_year <- function(year,
     print(nc_files)
   }
   
-  nc_file <- nc_files[1]
-  
-  r <- terra::rast(nc_file)
-  
-  message("Raster structure:")
-  print(r)
-  print(names(r))
+  r <- terra::rast(nc_files[1])
   
   if (terra::nlyr(r) > 12) {
     message("More than 12 layers found. Keeping first 12.")
@@ -104,8 +93,8 @@ download_era5land_monthly_year <- function(year,
   }
   
   if (terra::nlyr(r) != 12) {
-    warning(
-      "Expected 12 layers but found ",
+    stop(
+      "Expected 12 monthly layers but found ",
       terra::nlyr(r),
       " for ",
       year,
@@ -119,11 +108,10 @@ download_era5land_monthly_year <- function(year,
     "_",
     year,
     "_",
-    sprintf("%02d", seq_len(terra::nlyr(r)))
+    sprintf("%02d", 1:12)
   )
   
   message("Writing: ", out_file)
-  
   terra::writeRaster(
     r,
     filename = out_file,

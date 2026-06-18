@@ -16,21 +16,9 @@ dir_clim_stack <- file.path(dir_clim, "monthly_stacks")
 dir_create(dir_percentiles, recurse = TRUE)
 dir_create(dir_qa, recurse = TRUE)
 
-get_previous_month <- function(today = Sys.Date()) {
-  
-  first_day_this_month <- floor_date(today, unit = "month")
-  target_date <- first_day_this_month %m-% months(1)
-  
-  list(
-    year = year(target_date),
-    month = month(target_date)
-  )
-}
-
 get_current_monthly_file <- function(year,
                                      month,
                                      layer_shortname = "swvl1") {
-  
   month_chr <- sprintf("%02d", month)
   
   file.path(
@@ -48,7 +36,6 @@ get_current_monthly_file <- function(year,
 
 get_climatology_stack_file <- function(month,
                                        layer_shortname = "swvl1") {
-  
   month_chr <- sprintf("%02d", month)
   
   file.path(
@@ -58,20 +45,16 @@ get_climatology_stack_file <- function(month,
       "_clim_stack_",
       month_chr,
       "_",
-      min(clim_years),
-      "_",
-      max(clim_years),
+      get_clim_label(),
       ".tif"
     )
   )
 }
 
 calc_percentile_from_stack <- function(current_raster, clim_stack) {
-  
   x <- c(current_raster, clim_stack)
   
-  pct <- app(x, function(v) {
-    
+  pct <- terra::app(x, function(v) {
     current_val <- v[1]
     hist_vals <- v[-1]
     
@@ -83,17 +66,15 @@ calc_percentile_from_stack <- function(current_raster, clim_stack) {
   })
   
   names(pct) <- "soil_moisture_percentile"
-  
   pct
 }
 
 classify_percentile <- function(pct_raster) {
-  
   rcl <- matrix(
     c(
       -Inf,  2, 1,
-      2,   5, 2,
-      5,  10, 3,
+       2,   5, 2,
+       5,  10, 3,
       10,  20, 4,
       20,  40, 5,
       40,  60, 6,
@@ -103,14 +84,13 @@ classify_percentile <- function(pct_raster) {
     byrow = TRUE
   )
   
-  pct_class <- classify(
+  pct_class <- terra::classify(
     pct_raster,
     rcl = rcl,
     include.lowest = TRUE
   )
   
   names(pct_class) <- "soil_moisture_percentile_class"
-  
   pct_class
 }
 
@@ -120,7 +100,6 @@ compute_monthly_percentile <- function(year = NULL,
                                        current_file = NULL,
                                        overwrite = FALSE,
                                        make_qa_plot = TRUE) {
-  
   if (is.null(year) || is.null(month)) {
     target <- get_previous_month()
     year <- target$year
@@ -137,6 +116,7 @@ compute_monthly_percentile <- function(year = NULL,
   }
   
   month_chr <- sprintf("%02d", month)
+  clim_label <- get_clim_label()
   
   if (is.null(current_file)) {
     current_file <- get_current_monthly_file(
@@ -176,9 +156,7 @@ compute_monthly_percentile <- function(year = NULL,
       "_",
       month_chr,
       "_vs_",
-      min(clim_years),
-      "_",
-      max(clim_years),
+      clim_label,
       ".tif"
     )
   )
@@ -192,50 +170,33 @@ compute_monthly_percentile <- function(year = NULL,
       "_",
       month_chr,
       "_vs_",
-      min(clim_years),
-      "_",
-      max(clim_years),
+      clim_label,
       ".tif"
     )
   )
   
-  if (
-    file.exists(out_pct_file) &&
-    file.exists(out_class_file) &&
-    !overwrite
-  ) {
+  if (file.exists(out_pct_file) && file.exists(out_class_file) && !overwrite) {
     message("Already exists: ", out_pct_file)
     message("Already exists: ", out_class_file)
-    return(
-      list(
-        percentile = out_pct_file,
-        class = out_class_file
-      )
-    )
+    return(list(percentile = out_pct_file, class = out_class_file))
   }
   
   message("Reading current monthly mean: ", current_file)
-  current <- rast(current_file)
+  current <- terra::rast(current_file)
   
-  if (nlyr(current) != 1) {
+  if (terra::nlyr(current) != 1) {
     stop(
       "Expected current_file to have one monthly mean layer, but found ",
-      nlyr(current)
+      terra::nlyr(current)
     )
   }
   
-  names(current) <- paste0(
-    layer_shortname,
-    "_monthly_mean_",
-    year,
-    "_",
-    month_chr
-  )
+  names(current) <- paste0(layer_shortname, "_monthly_mean_", year, "_", month_chr)
   
   message("Reading climatology stack: ", clim_file)
-  clim_stack <- rast(clim_file)
+  clim_stack <- terra::rast(clim_file)
   
-  if (!compareGeom(current, clim_stack, stopOnError = FALSE)) {
+  if (!terra::compareGeom(current, clim_stack, stopOnError = FALSE)) {
     stop(
       "Current raster and climatology stack do not have matching geometry. ",
       "Check AOI, resolution, CRS, and download settings."
@@ -243,27 +204,23 @@ compute_monthly_percentile <- function(year = NULL,
   }
   
   message("Computing percentile raster for ", layer_shortname, " ", year, "-", month_chr)
-  
   pct <- calc_percentile_from_stack(current, clim_stack)
   
-  pct_summary <- global(pct, c("min", "mean", "max"), na.rm = TRUE)
+  pct_summary <- terra::global(pct, c("min", "mean", "max"), na.rm = TRUE)
   print(pct_summary)
   
   message("Writing percentile raster: ", out_pct_file)
-  
-  writeRaster(
+  terra::writeRaster(
     pct,
     filename = out_pct_file,
     overwrite = TRUE,
     gdal = c("COMPRESS=LZW")
   )
   
-  message("Computing percentile class raster")
   pct_class <- classify_percentile(pct)
   
   message("Writing percentile class raster: ", out_class_file)
-  
-  writeRaster(
+  terra::writeRaster(
     pct_class,
     filename = out_class_file,
     overwrite = TRUE,
@@ -271,22 +228,12 @@ compute_monthly_percentile <- function(year = NULL,
   )
   
   if (make_qa_plot) {
-    
     png_file <- file.path(
       dir_qa,
-      paste0(
-        "qa_",
-        layer_shortname,
-        "_percentile_",
-        year,
-        "_",
-        month_chr,
-        ".png"
-      )
+      paste0("qa_", layer_shortname, "_percentile_", year, "_", month_chr, ".png")
     )
     
     png(png_file, width = 1400, height = 800)
-    
     par(mfrow = c(1, 2))
     
     plot(
@@ -306,32 +253,20 @@ compute_monthly_percentile <- function(year = NULL,
     
     plot(
       pct_class,
-      main = paste0(
-        layer_shortname,
-        " percentile class: ",
-        year,
-        "-",
-        month_chr
-      )
+      main = paste0(layer_shortname, " percentile class: ", year, "-", month_chr)
     )
     
     dev.off()
-    
     message("Wrote QA plot: ", png_file)
   }
   
-  list(
-    percentile = out_pct_file,
-    class = out_class_file
-  )
+  list(percentile = out_pct_file, class = out_class_file)
 }
 
 compute_previous_month_percentile <- function(layer_shortname = "swvl1",
                                               overwrite = FALSE,
                                               make_qa_plot = TRUE) {
-  
   target <- get_previous_month()
-  
   compute_monthly_percentile(
     year = target$year,
     month = target$month,
