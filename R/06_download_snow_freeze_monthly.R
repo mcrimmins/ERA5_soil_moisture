@@ -501,6 +501,8 @@ download_monthly_mask_variable <- function(year = NULL,
     na.rm = TRUE
   )
   
+  r_mean <- fix_longitude_0_360(r_mean, paste(mask_shortname, "monthly mean"))
+  
   names(r_mean) <- paste0(
     mask_shortname,
     "_monthly_mean_",
@@ -576,6 +578,8 @@ download_monthly_mask_variable <- function(year = NULL,
       mean,
       na.rm = TRUE
     )
+    
+    r_fraction <- fix_longitude_0_360(r_fraction, paste(mask_shortname, "monthly fraction"))
     
     names(r_fraction) <- paste0(
       "snow_fraction_",
@@ -776,6 +780,8 @@ create_snow_freeze_mask <- function(year = NULL,
   # 2 = frozen ground
   # 3 = snow + frozen ground
   mask <- snow_flag + (2 * freeze_flag)
+  
+  mask <- fix_longitude_0_360(mask, "snow/freeze mask")
   
   names(mask) <- "snow_freeze_mask"
   

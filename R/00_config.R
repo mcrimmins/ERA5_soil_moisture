@@ -297,3 +297,27 @@ align_to_reference <- function(x,
   
   x
 }
+
+####
+# long fixer
+####
+
+fix_longitude_0_360 <- function(r, label = "raster") {
+  
+  r_ext <- terra::ext(r)
+  
+  if (terra::xmin(r_ext) >= 0 && terra::xmax(r_ext) > 180) {
+    
+    message(label, " appears to use 0-360 longitude. Shifting to -180/180.")
+    
+    terra::ext(r) <- terra::ext(
+      terra::xmin(r_ext) - 360,
+      terra::xmax(r_ext) - 360,
+      terra::ymin(r_ext),
+      terra::ymax(r_ext)
+    )
+  }
+  
+  r
+}
+
